@@ -48,9 +48,10 @@ if (fs.existsSync(publicDir)) {
 // --- State ---
 let sock = null;
 let connectionStatus = 'disconnected';
-let qrDataUrl = null; // Base64 PNG data URL of the QR code
+let qrDataUrl = null;
+let qrGeneratedAt = 0; // timestamp when QR was last generated
 let retryCount = 0;
-const MAX_RETRIES = 5;
+const MAX_RETRIES = 10;
 
 // --- WhatsApp Connection ---
 async function connectWhatsApp() {
@@ -78,9 +79,10 @@ async function connectWhatsApp() {
     if (qr) {
       try {
         qrDataUrl = await QRCode.toDataURL(qr, { width: 300, margin: 2 });
+        qrGeneratedAt = Date.now();
         connectionStatus = 'qr_ready';
         retryCount = 0;
-        console.log('[WhatsApp] ✅ QR code generated! Open the dashboard to scan it.');
+        console.log('[WhatsApp] QR code generated. Waiting for scan...');
       } catch (err) {
         console.error('[WhatsApp] Failed to generate QR image:', err);
       }
@@ -88,26 +90,37 @@ async function connectWhatsApp() {
 
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
-      qrDataUrl = null;
 
       if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
         console.log('[WhatsApp] Logged out. Clearing session...');
         if (fs.existsSync(AUTH_DIR)) fs.rmSync(AUTH_DIR, { recursive: true, force: true });
         connectionStatus = 'awaiting_setup';
+        qrDataUrl = null;
         retryCount = 0;
       } else if (statusCode === DisconnectReason.restartRequired || statusCode === 515) {
         console.log('[WhatsApp] Restart required. Reconnecting...');
         setTimeout(() => connectWhatsApp(), 2000);
       } else {
+        // If QR was recently generated (within 2 min), keep retrying silently
+        // This is normal — WhatsApp closes connection between QR refreshes
+        const qrAge = Date.now() - qrGeneratedAt;
+        const isQrPhase = qrAge < 120000 && qrDataUrl;
+
         retryCount++;
         if (retryCount <= MAX_RETRIES) {
-          const delay = Math.min(3000 * retryCount, 15000);
-          console.log(`[WhatsApp] Disconnected (${statusCode}). Retry ${retryCount}/${MAX_RETRIES} in ${delay / 1000}s...`);
-          connectionStatus = 'reconnecting';
+          const delay = isQrPhase ? 2000 : Math.min(3000 * retryCount, 15000);
+          if (!isQrPhase) {
+            console.log(`[WhatsApp] Disconnected (${statusCode}). Retry ${retryCount}/${MAX_RETRIES} in ${delay / 1000}s...`);
+            connectionStatus = 'reconnecting';
+          } else {
+            console.log(`[WhatsApp] QR refresh cycle (${statusCode}). Reconnecting...`);
+            // Keep qrDataUrl visible — don't clear it during QR phase
+          }
           setTimeout(() => connectWhatsApp(), delay);
         } else {
-          console.log('[WhatsApp] Max retries. Use dashboard to reconnect.');
+          console.log('[WhatsApp] Max retries reached. Tap "Generate QR" to try again.');
           connectionStatus = 'disconnected';
+          qrDataUrl = null;
         }
       }
     } else if (connection === 'open') {
@@ -134,11 +147,11 @@ async function connectWhatsApp() {
 app.get('/api/status', (req, res) => {
   res.json({
     connection: connectionStatus,
-    qr: qrDataUrl, // Base64 PNG data URL
+    qr: qrDataUrl,
   });
 });
 
-// Start/restart connection to get a new QR
+// Start connection to get QR
 app.post('/api/connect', async (req, res) => {
   // Clear old session for fresh QR
   if (fs.existsSync(AUTH_DIR)) fs.rmSync(AUTH_DIR, { recursive: true, force: true });
@@ -149,15 +162,20 @@ app.post('/api/connect', async (req, res) => {
   try {
     await connectWhatsApp();
 
-    // Wait for QR to be generated
+    // Wait for QR to be generated (up to 15s)
     let waited = 0;
-    while (!qrDataUrl && waited < 10000) {
+    while (!qrDataUrl && waited < 15000) {
       await new Promise(r => setTimeout(r, 300));
       waited += 300;
     }
 
-    res.json({ success: true, qr: qrDataUrl });
+    if (qrDataUrl) {
+      res.json({ success: true, qr: qrDataUrl });
+    } else {
+      res.json({ success: true, message: 'Connecting... refresh in a few seconds.' });
+    }
   } catch (err) {
+    console.error('[API /connect] Error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -211,7 +229,7 @@ app.delete('/api/templates/:id', (req, res) => {
 // --- Wish Log ---
 app.get('/api/wishes/today', (req, res) => res.json(getTodayWishes()));
 
-// --- SPA fallback (serve frontend for non-API routes) ---
+// --- SPA fallback ---
 if (fs.existsSync(publicDir)) {
   app.get('*', (req, res) => {
     res.sendFile(path.join(publicDir, 'index.html'));
@@ -225,14 +243,14 @@ async function start() {
   loadWishedCacheFromDb();
 
   app.listen(PORT, () => {
-    console.log(`\n🎂 Birthday Agent Backend running on http://localhost:${PORT}`);
+    console.log(`\n🎂 Birthday Agent Backend running on port ${PORT}`);
 
-    // Keep-alive ping to prevent free-tier platforms from sleeping
+    // Keep-alive ping for free-tier hosting
     if (process.env.RENDER_EXTERNAL_URL || process.env.RENDER) {
       const url = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
       setInterval(() => {
         fetch(`${url}/api/status`).catch(() => {});
-      }, 10 * 60 * 1000); // Ping every 10 minutes
+      }, 10 * 60 * 1000);
       console.log('[Keep-Alive] Self-ping enabled (every 10 min)');
     }
 
@@ -241,8 +259,7 @@ async function start() {
       connectWhatsApp();
     } else {
       connectionStatus = 'awaiting_setup';
-      console.log('[WhatsApp] No session found.');
-      console.log('[WhatsApp] Open the dashboard -> Setup tab to scan QR.\n');
+      console.log('[WhatsApp] No session. Open dashboard -> Setup to scan QR.\n');
     }
   });
 }
