@@ -227,13 +227,22 @@ async function start() {
   app.listen(PORT, () => {
     console.log(`\n🎂 Birthday Agent Backend running on http://localhost:${PORT}`);
 
+    // Keep-alive ping to prevent free-tier platforms from sleeping
+    if (process.env.RENDER_EXTERNAL_URL || process.env.RENDER) {
+      const url = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+      setInterval(() => {
+        fetch(`${url}/api/status`).catch(() => {});
+      }, 10 * 60 * 1000); // Ping every 10 minutes
+      console.log('[Keep-Alive] Self-ping enabled (every 10 min)');
+    }
+
     if (fs.existsSync(path.join(AUTH_DIR, 'creds.json'))) {
       console.log('[WhatsApp] Found existing session. Reconnecting...\n');
       connectWhatsApp();
     } else {
       connectionStatus = 'awaiting_setup';
       console.log('[WhatsApp] No session found.');
-      console.log('[WhatsApp] Open http://localhost:5173 -> Setup tab to scan QR.\n');
+      console.log('[WhatsApp] Open the dashboard -> Setup tab to scan QR.\n');
     }
   });
 }
