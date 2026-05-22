@@ -1,0 +1,17 @@
+# Render.com Blueprint - deploy with "New > Blueprint" and point to your repo
+services:
+  - type: web
+    name: birthday-agent
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run --workspace=frontend build && cp -r frontend/dist backend/public
+    startCommand: node backend/server.js
+    envVars:
+      - key: PORT
+        value: 3001
+      - key: NODE_ENV
+        value: production
+    disk:
+      name: agent-data
+      mountPath: /app/backend/auth_session
+      sizeGB: 1

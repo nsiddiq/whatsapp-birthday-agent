@@ -1,0 +1,6 @@
+node_modules/
+dist/
+backend/auth_session/
+backend/birthday_agent.db
+.env
+*.log
