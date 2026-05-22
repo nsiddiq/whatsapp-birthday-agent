@@ -25,7 +25,7 @@ import {
   getTodayWishes,
 } from './database.js';
 
-import { handleIncomingMessage, loadWishedCacheFromDb } from './birthday-listener.js';
+import { handleIncomingMessage, loadWishedCacheFromDb, getWatchedGroup, setWatchedGroup } from './birthday-listener.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -229,6 +229,38 @@ app.delete('/api/templates/:id', (req, res) => {
 // --- Wish Log ---
 app.get('/api/wishes/today', (req, res) => res.json(getTodayWishes()));
 
+// --- Group Watch Settings ---
+app.get('/api/settings/group', (req, res) => {
+  res.json({ watchedGroupJid: getWatchedGroup() });
+});
+
+app.post('/api/settings/group', (req, res) => {
+  const { groupJid } = req.body;
+  setWatchedGroup(groupJid || null);
+  console.log(`[Settings] Watched group set to: ${groupJid || 'ALL (no filter)'}`);
+  res.json({ success: true, watchedGroupJid: getWatchedGroup() });
+});
+
+// List all groups the bot is in
+app.get('/api/groups', async (req, res) => {
+  if (!sock || connectionStatus !== 'connected') {
+    return res.status(503).json({ error: 'WhatsApp not connected' });
+  }
+  try {
+    const groups = await sock.groupFetchAllParticipating();
+    const list = Object.values(groups).map(g => ({
+      jid: g.id,
+      name: g.subject,
+      participants: g.participants?.length || 0,
+    }));
+    list.sort((a, b) => a.name.localeCompare(b.name));
+    res.json(list);
+  } catch (err) {
+    console.error('[API /groups] Error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch groups' });
+  }
+});
+
 // --- SPA fallback ---
 if (fs.existsSync(publicDir)) {
   app.get('*', (req, res) => {
@@ -242,7 +274,7 @@ async function start() {
   console.log('[Database] ✅ SQLite initialized');
   loadWishedCacheFromDb();
 
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n🎂 Birthday Agent Backend running on port ${PORT}`);
 
     // Keep-alive ping for free-tier hosting

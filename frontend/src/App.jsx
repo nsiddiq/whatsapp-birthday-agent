@@ -4,6 +4,7 @@ import TheBrain from './pages/TheBrain';
 import Roster from './pages/Roster';
 import TemplateBuilder from './pages/TemplateBuilder';
 import Setup from './pages/Setup';
+import Settings from './pages/Settings';
 
 function App() {
   return (
@@ -21,6 +22,7 @@ function App() {
           <Route path="/roster" element={<Roster />} />
           <Route path="/templates" element={<TemplateBuilder />} />
           <Route path="/setup" element={<Setup />} />
+          <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>
 
@@ -68,8 +70,19 @@ function App() {
               }`
             }
           >
-            <span className="text-xl mb-0.5">⚙️</span>
+            <span className="text-xl mb-0.5">📡</span>
             Setup
+          </NavLink>
+          <NavLink
+            to="/settings"
+            className={({ isActive }) =>
+              `flex flex-col items-center px-2 py-1 text-xs ${
+                isActive ? 'text-whatsapp-teal font-semibold' : 'text-gray-500'
+              }`
+            }
+          >
+            <span className="text-xl mb-0.5">⚙️</span>
+            Settings
           </NavLink>
         </div>
       </nav>

@@ -6,8 +6,40 @@ import {
   logWish,
   getWishedContactsForYear,
 } from './database.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export const AI_SIGNATURE = '\n\n🤖 [This is Nasir\'s AI Agent Assistant]';
+
+// --- Config file for watched group ---
+const CONFIG_PATH = path.join(__dirname, 'config.json');
+
+function loadConfig() {
+  try {
+    if (fs.existsSync(CONFIG_PATH)) {
+      return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    }
+  } catch (e) { /* ignore */ }
+  return { watchedGroupJid: null };
+}
+
+function saveConfig(config) {
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+}
+
+export function getWatchedGroup() {
+  return loadConfig().watchedGroupJid;
+}
+
+export function setWatchedGroup(jid) {
+  const config = loadConfig();
+  config.watchedGroupJid = jid || null;
+  saveConfig(config);
+}
 
 // In-memory cache to prevent duplicate wishes within the same year
 const wishedCache = new Map();
@@ -71,6 +103,13 @@ export async function handleIncomingMessage(sock, message) {
 
     const remoteJid = message.key.remoteJid;
     const senderJid = message.key.participant || remoteJid;
+
+    // --- GROUP FILTER ---
+    const watchedGroup = getWatchedGroup();
+    if (watchedGroup) {
+      // Only process messages from the watched group
+      if (remoteJid !== watchedGroup) return null;
+    }
 
     if (message.key.fromMe) return null;
 
